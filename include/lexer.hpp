@@ -2,55 +2,56 @@
 
 #include <string_view>
 #include <variant>
-#include <optional>
+#include <string>
 #include <stdexcept>
 
-enum class TokenKind {
-    String,
-    Number,
+enum class Tk {
+    Str,
+    Num,
     Bool,
     Null,
-    DotLBrace,   // .{
-    LBrace,      // {
-    RBrace,      // }
-    LBracket,    // [
-    RBracket,    // ]
-    Colon,       // :
-    Comma,       // ,
-    Equal,       // =
-    Ident,
+    DotLb,
+    Lb,
+    Rb,
+    Lbk,
+    Rbk,
+    Colon,
+    Comma,
+    Eq,
+    Id,
     Const,
     Eof,
-    Semicolon    // ;
+    Semi
 };
 
 struct Token {
-    TokenKind kind;
-    std::variant<std::string_view, double, bool> value;
+    Tk kind;
+    std::variant<std::string, double, bool, std::string_view> val;
 
-    Token(TokenKind k) : kind(k), value(false) {}
-    Token(std::string_view s) : kind(TokenKind::String), value(s) {}
-    Token(double n) : kind(TokenKind::Number), value(n) {}
-    Token(bool b) : kind(TokenKind::Bool), value(b) {}
-    Token(TokenKind k, std::string_view id) : kind(k), value(id) {
-    }
+    Token(Tk k);
+    Token(std::string s);
+    Token(double n);
+    Token(bool b);
+    Token(Tk k, std::string_view id);
 };
 
 class Lexer {
 public:
-    explicit Lexer(std::string_view input);
-
-    Token nextToken();  // throws std::runtime_error
+    explicit Lexer(std::string_view in);
+    Token next();
 
 private:
-    std::string_view input_;
-    size_t pos_ = 0;
+    std::string_view in_;
+    size_t pos_;
+    size_t line_;
+    size_t col_;
 
-    char peekChar() const;
+    [[noreturn]] void err(const std::string& msg) const;
+    char peek() const;
     char bump();
-    void skipWhitespace();
-    bool skipComment();
-    std::string_view readIdent();
-    std::string_view readString();
-    double readNumber();
+    void skip_ws();
+    bool skip_cmt();
+    std::string_view rd_id();
+    std::string rd_str();
+    double rd_num();
 };
