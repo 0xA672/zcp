@@ -1,51 +1,99 @@
 #include "lexer.hpp"
 #include <cctype>
-#include <string>
+#include <charconv>
 
-Lexer::Lexer(std::string_view input) : input_(input) {}
+Token::Token(Tk k) : kind(k), val(false) {}
+Token::Token(std::string s) : kind(Tk::Str), val(std::move(s)) {}
+Token::Token(double n) : kind(Tk::Num), val(n) {}
+Token::Token(bool b) : kind(Tk::Bool), val(b) {}
+Token::Token(Tk k, std::string_view id) : kind(k), val(id) {}
 
-char Lexer::peekChar() const {
-    if (pos_ < input_.size()) return input_[pos_];
-    return '\0';
-}
+Lexer::Lexer(std::string_view in) : in_(in), pos_(0), line_(1), col_(1) {}
 
-char Lexer::bump() {
-    if (pos_ < input_.size()) return input_[pos_++];
-    return '\0';
-}
-
-void Lexer::skipWhitespace() {
-    while (std::isspace(static_cast<unsigned char>(peekChar()))) {
-        bump();
+Token Lexer::next() {
+    while (true) {
+        skip_ws();
+        if (!skip_cmt()) break;
+    }
+    char c = peek();
+    if (c == '\0') return Token(Tk::Eof);
+    switch (c) {
+        case '{': bump(); return Token(Tk::Lb);
+        case '}': bump(); return Token(Tk::Rb);
+        case '[': bump(); return Token(Tk::Lbk);
+        case ']': bump(); return Token(Tk::Rbk);
+        case ':': bump(); return Token(Tk::Colon);
+        case ';': bump(); return Token(Tk::Semi);
+        case ',': bump(); return Token(Tk::Comma);
+        case '=': bump(); return Token(Tk::Eq);
+        case '.': {
+            if (pos_ + 1 < in_.size() && in_[pos_ + 1] == '{') {
+                bump(); bump();
+                return Token(Tk::DotLb);
+            }
+            auto id = rd_id();
+            return Token(Tk::Id, id);
+        }
+        case '"': {
+            auto s = rd_str();
+            return Token(std::string(s));
+        }
+        default:
+            if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+                auto id = rd_id();
+                if (id == "true") return Token(true);
+                if (id == "false") return Token(false);
+                if (id == "null") return Token(Tk::Null);
+                if (id == "const") return Token(Tk::Const);
+                return Token(Tk::Id, id);
+            }
+            if (std::isdigit(static_cast<unsigned char>(c)) || c == '-') {
+                double n = rd_num();
+                return Token(n);
+            }
+            err(std::string("unexpected char '") + c + "'");
     }
 }
 
-bool Lexer::skipComment() {
-    if (peekChar() != '/') return false;
-    char next = pos_ + 1 < input_.size() ? input_[pos_ + 1] : '\0';
-    if (next == '/') {
-        // line comment
+[[noreturn]] void Lexer::err(const std::string& msg) const {
+    throw std::runtime_error(msg + " at " + std::to_string(line_) + ":" + std::to_string(col_));
+}
+
+char Lexer::peek() const {
+    return pos_ < in_.size() ? in_[pos_] : '\0';
+}
+
+char Lexer::bump() {
+    if (pos_ >= in_.size()) return '\0';
+    char c = in_[pos_++];
+    if (c == '\n') { line_++; col_ = 1; }
+    else col_++;
+    return c;
+}
+
+void Lexer::skip_ws() {
+    while (std::isspace(static_cast<unsigned char>(peek()))) bump();
+}
+
+bool Lexer::skip_cmt() {
+    if (peek() != '/') return false;
+    char nxt = pos_ + 1 < in_.size() ? in_[pos_ + 1] : '\0';
+    if (nxt == '/') {
         bump(); bump();
-        while (peekChar() != '\0' && peekChar() != '\n') bump();
+        while (peek() != '\0' && peek() != '\n') bump();
         return true;
-    } else if (next == '*') {
-        // block comment and possibly nested
+    }
+    if (nxt == '*') {
         bump(); bump();
-        int depth = 1;
-        while (depth > 0) {
-            if (peekChar() == '\0') break;
-            if (peekChar() == '*') {
+        int d = 1;
+        while (d > 0) {
+            if (peek() == '\0') err("unclosed block comment");
+            if (peek() == '*') {
                 bump();
-                if (peekChar() == '/') {
-                    bump();
-                    depth--;
-                }
-            } else if (peekChar() == '/') {
+                if (peek() == '/') { bump(); d--; }
+            } else if (peek() == '/') {
                 bump();
-                if (peekChar() == '*') {
-                    bump();
-                    depth++;
-                }
+                if (peek() == '*') { bump(); d++; }
             } else {
                 bump();
             }
@@ -55,97 +103,66 @@ bool Lexer::skipComment() {
     return false;
 }
 
-std::string_view Lexer::readIdent() {
-    size_t start = pos_;
-    // ZON allows identifier to start with dot, e.g. .name
-    if (peekChar() == '.') bump();
-    while (std::isalnum(static_cast<unsigned char>(peekChar())) || peekChar() == '_') {
-        bump();
-    }
-    return input_.substr(start, pos_ - start);
+std::string_view Lexer::rd_id() {
+    size_t s = pos_;
+    if (peek() == '.') bump();
+    while (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_') bump();
+    return in_.substr(s, pos_ - s);
 }
 
-std::string_view Lexer::readString() {
-    bump(); // consume opening "
-    size_t start = pos_;
-    while (peekChar() != '\0') {
-        if (peekChar() == '"') {
-            std::string_view result = input_.substr(start, pos_ - start);
-            bump(); // consume closing "
-            return result;
-        }
-        if (peekChar() == '\\') {
-            throw std::runtime_error("Escape sequences not supported in zero-copy mode");
-        }
-        bump();
-    }
-    throw std::runtime_error("Unclosed string");
-}
-
-double Lexer::readNumber() {
-    size_t start = pos_;
-    if (peekChar() == '-') bump();
-    while (std::isdigit(static_cast<unsigned char>(peekChar()))) bump();
-    if (peekChar() == '.') {
-        bump();
-        while (std::isdigit(static_cast<unsigned char>(peekChar()))) bump();
-    }
-    if (peekChar() == 'e' || peekChar() == 'E') {
-        bump();
-        if (peekChar() == '+' || peekChar() == '-') bump();
-        while (std::isdigit(static_cast<unsigned char>(peekChar()))) bump();
-    }
-    std::string_view slice = input_.substr(start, pos_ - start);
-    return std::stod(std::string(slice));
-}
-
-Token Lexer::nextToken() {
+std::string Lexer::rd_str() {
+    bump(); // '"'
+    std::string v;
+    size_t s = pos_;
     while (true) {
-        skipWhitespace();
-        if (!skipComment()) break;
-    }
-
-    char c = peekChar();
-    if (c == '\0') return Token(TokenKind::Eof);
-
-    switch (c) {
-        case '{': bump(); return Token(TokenKind::LBrace);
-        case '}': bump(); return Token(TokenKind::RBrace);
-        case '[': bump(); return Token(TokenKind::LBracket);
-        case ']': bump(); return Token(TokenKind::RBracket);
-        case ':': bump(); return Token(TokenKind::Colon);
-        case ';': bump(); return Token(TokenKind::Semicolon);
-        case ',': bump(); return Token(TokenKind::Comma);
-        case '=': bump(); return Token(TokenKind::Equal);
-        case '.': {
-            bump();
-            if (peekChar() == '{') {
+        char c = peek();
+        if (c == '\0') err("unclosed string");
+        if (c == '"') {
+            if (v.empty()) {
+                auto r = in_.substr(s, pos_ - s);
                 bump();
-                return Token(TokenKind::DotLBrace);
-            } else if (std::isalpha(static_cast<unsigned char>(peekChar())) || peekChar() == '_') {
-                std::string_view ident = readIdent();
-                return Token(TokenKind::Ident, ident);
-            } else {
-                throw std::runtime_error("Unexpected '.'");
+                return std::string(r);
             }
+            v.append(in_.data() + s, pos_ - s);
+            bump();
+            return v;
         }
-        case '"': {
-            std::string_view s = readString();
-            return Token(s);
-        }
-        default:
-            if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
-                std::string_view ident = readIdent();
-                if (ident == "true") return Token(true);
-                if (ident == "false") return Token(false);
-                if (ident == "null") return Token(TokenKind::Null);
-                if (ident == "const") return Token(TokenKind::Const);
-                return Token(TokenKind::Ident, ident);
-            } else if (std::isdigit(static_cast<unsigned char>(c)) || c == '-') {
-                double num = readNumber();
-                return Token(num);
-            } else {
-                throw std::runtime_error(std::string("Unexpected byte: ") + c);
+        if (c == '\\') {
+            v.append(in_.data() + s, pos_ - s);
+            bump();
+            char esc = bump();
+            switch (esc) {
+                case '"':  v.push_back('"'); break;
+                case '\\': v.push_back('\\'); break;
+                case 'n':  v.push_back('\n'); break;
+                case 'r':  v.push_back('\r'); break;
+                case 't':  v.push_back('\t'); break;
+                case '\0': err("unclosed escape");
+                default:   err(std::string("unknown escape \\") + esc);
             }
+            s = pos_;
+        } else {
+            bump();
+        }
     }
+}
+
+double Lexer::rd_num() {
+    size_t s = pos_;
+    if (peek() == '-') bump();
+    while (std::isdigit(static_cast<unsigned char>(peek()))) bump();
+    if (peek() == '.') {
+        bump();
+        while (std::isdigit(static_cast<unsigned char>(peek()))) bump();
+    }
+    if (peek() == 'e' || peek() == 'E') {
+        bump();
+        if (peek() == '+' || peek() == '-') bump();
+        while (std::isdigit(static_cast<unsigned char>(peek()))) bump();
+    }
+    auto sv = in_.substr(s, pos_ - s);
+    double val = 0.0;
+    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), val);
+    if (ec != std::errc()) err("invalid number '" + std::string(sv) + "'");
+    return val;
 }
