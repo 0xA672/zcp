@@ -19,6 +19,7 @@ enum class Tk {
     Comma,
     Eq,
     Id,
+    EnumLit,
     Const,
     Eof,
     Semi
