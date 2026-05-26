@@ -1,6 +1,8 @@
 #include "lexer.hpp"
 #include <cctype>
 #include <charconv>
+#include <stdexcept>
+#include <string>
 
 Token::Token(Tk k) : kind(k), val(false) {}
 Token::Token(std::string s) : kind(Tk::Str), val(std::move(s)) {}
@@ -27,12 +29,16 @@ Token Lexer::next() {
         case ',': bump(); return Token(Tk::Comma);
         case '=': bump(); return Token(Tk::Eq);
         case '.': {
-            if (pos_ + 1 < in_.size() && in_[pos_ + 1] == '{') {
+            char nxt = pos_ + 1 < in_.size() ? in_[pos_ + 1] : '\0';
+            if (nxt == '{') {
                 bump(); bump();
                 return Token(Tk::DotLb);
             }
-            auto id = rd_id();
-            return Token(Tk::Id, id);
+            if (std::isalpha(static_cast<unsigned char>(nxt)) || nxt == '_') {
+                auto id = rd_id();
+                return Token(Tk::EnumLit, id);
+            }
+            err("unexpected '.'");
         }
         case '"': {
             auto s = rd_str();
@@ -111,7 +117,7 @@ std::string_view Lexer::rd_id() {
 }
 
 std::string Lexer::rd_str() {
-    bump(); // '"'
+    bump();
     std::string v;
     size_t s = pos_;
     while (true) {
@@ -150,19 +156,63 @@ std::string Lexer::rd_str() {
 double Lexer::rd_num() {
     size_t s = pos_;
     if (peek() == '-') bump();
-    while (std::isdigit(static_cast<unsigned char>(peek()))) bump();
-    if (peek() == '.') {
-        bump();
-        while (std::isdigit(static_cast<unsigned char>(peek()))) bump();
+
+    bool is_hex = false;
+    if (peek() == '0') {
+        char nxt = pos_ + 1 < in_.size() ? in_[pos_ + 1] : '\0';
+        if (nxt == 'x' || nxt == 'X') {
+            bump(); bump();
+            is_hex = true;
+        }
     }
-    if (peek() == 'e' || peek() == 'E') {
+
+    std::string raw;
+    while (true) {
+        char c = peek();
+        if (c == '_') { bump(); continue; }
+        if (is_hex) {
+            if (std::isxdigit(static_cast<unsigned char>(c))) {
+                raw.push_back(c);
+            } else {
+                break;
+            }
+        } else {
+            if (std::isdigit(static_cast<unsigned char>(c)) || c == '.') {
+                raw.push_back(c);
+            } else if (c == 'e' || c == 'E') {
+                raw.push_back('e');
+                bump();
+                if (peek() == '+' || peek() == '-') {
+                    raw.push_back(peek());
+                    bump();
+                }
+                while (peek() == '_' ||
+                       std::isdigit(static_cast<unsigned char>(peek()))) {
+                    if (peek() == '_') { bump(); continue; }
+                    raw.push_back(peek());
+                    bump();
+                }
+                break;
+            } else {
+                break;
+            }
+        }
         bump();
-        if (peek() == '+' || peek() == '-') bump();
-        while (std::isdigit(static_cast<unsigned char>(peek()))) bump();
     }
-    auto sv = in_.substr(s, pos_ - s);
+
+    if (raw.empty()) err("invalid number");
+
+    if (is_hex) {
+        raw.insert(0, "0x");
+        unsigned long long v = std::stoull(raw, nullptr, 16);
+        double result = static_cast<double>(v);
+        if (s > 0 && in_[s-1] == '-') result = -result;
+        return result;
+    }
+
+    if (s > 0 && in_[s-1] == '-') raw.insert(raw.begin(), '-');
     double val = 0.0;
-    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), val);
-    if (ec != std::errc()) err("invalid number '" + std::string(sv) + "'");
+    auto [ptr, ec] = std::from_chars(raw.data(), raw.data() + raw.size(), val);
+    if (ec != std::errc()) err("invalid number");
     return val;
 }
