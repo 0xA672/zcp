@@ -47,7 +47,7 @@ static void print_node(const AstNode& node, int indent = 0) {
         case AstNode::Kind::Number:
             if (node.is_float) std::printf("%g", node.float_val);
             else if (!node.str_val.empty()) std::printf("%s", node.str_val.c_str());
-            else std::printf("%llu", (unsigned long long)node.int_val);
+            else std::printf("%lld", (long long)node.int_val);
             break;
         case AstNode::Kind::Bool:    std::printf(node.bool_val ? "true" : "false"); break;
         case AstNode::Kind::Null:    std::printf("null"); break;
@@ -69,7 +69,7 @@ static const AstNode* find_field(const AstNode& node, const std::string& name) {
 static std::string ss(const AstNode* n) {
     return (!n || n->kind != AstNode::Kind::String) ? "" : n->str_val;
 }
-static uint64_t si(const AstNode* n) {
+static int64_t si(const AstNode* n) {
     return (!n || n->kind != AstNode::Kind::Number || n->is_float) ? 0 : n->int_val;
 }
 static double sf(const AstNode* n) {
@@ -162,7 +162,7 @@ static bool v_enum(const AstNode& r) {
 static bool v_neg(const AstNode& r) {
     bool ok = r.kind == AstNode::Kind::Tuple && r.items.size() == 2;
     if (ok) {
-        ok = r.items[0]->kind == AstNode::Kind::Number && !r.items[0]->is_float && r.items[0]->int_val == 42;
+        ok = r.items[0]->kind == AstNode::Kind::Number && !r.items[0]->is_float && r.items[0]->int_val == -42;
         ok = ok && r.items[1]->kind == AstNode::Kind::Number && r.items[1]->is_float && std::fabs(r.items[1]->float_val + 3.14) < 0.001;
     }
     std::printf("  %s  -42 and -3.14\n", ok ? "OK" : "FAIL"); return ok;
@@ -180,7 +180,7 @@ static bool v_multiline(const AstNode& r) {
 
 static bool v_array(const AstNode& r) {
     bool ok = r.kind == AstNode::Kind::Array && r.items.size() == 3;
-    if (ok) for (int i = 0; i < 3; i++) ok = ok && r.items[i]->kind == AstNode::Kind::Number && r.items[i]->int_val == (uint64_t)(i + 1);
+    if (ok) for (int i = 0; i < 3; i++) ok = ok && r.items[i]->kind == AstNode::Kind::Number && r.items[i]->int_val == (int64_t)(i + 1);
     std::printf("  %s  [1,2,3]\n", ok ? "OK" : "FAIL"); return ok;
 }
 

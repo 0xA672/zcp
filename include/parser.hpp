@@ -27,7 +27,7 @@ struct AstNode {
     };
     Kind kind;
     std::string str_val;          // String content, EnumLit name, big-int raw, MultiLine content
-    uint64_t    int_val = 0;  // Integer value (0 if overflow/big)
+    int64_t     int_val = 0;  // Integer value (0 if overflow/big)
     double      float_val = 0.0;  // Float value
     bool        is_float = false;  // Number is float vs int
     bool        bool_val = false;  // Bool value
@@ -162,7 +162,7 @@ private:
                     if (tok_.num_is_float) {
                         node->float_val = -tok_.num_f64;
                     } else {
-                        node->int_val = tok_.num_u64;
+                        node->int_val = -(int64_t)tok_.num_u64;
                         // For negative big int preserve prefix
                         if (tok_.is_big_int)
                             node->str_val = "-" + tok_.num_str;
@@ -192,6 +192,8 @@ private:
     // Named struct: .{ .key = val, ... }
     // Tuple:        .{ val, val, ... }
     // Both close with just }
+    
+    
     std::unique_ptr<AstNode> parse_struct_or_tuple() {
         auto node = std::make_unique<AstNode>();
         bool has_named_fields = false;
@@ -207,42 +209,30 @@ private:
                 return nullptr;
             }
 
-            // Named field: .identifier = value
-            // Or nested value starting with . (like .{ ... })
             if (tok_.kind == Tk::Period) {
                 advance();
                 if (tok_.kind == Tk::Identifier) {
-                    // Could be .identifier = value (field) or bare .identifier (enum literal value) 
                     std::string key(tok_.sv);
                     advance();
                     if (tok_.kind == Tk::Equal) {
-                        // .identifier = value -- named field
-                        advance(); // consume =
+                        advance();
                         auto val = parse_value();
-                        if (!val) { error_ = "expected value after '." + key + " ='"; return nullptr; }
+                        if (!val) { error_ = "expected value after '.'" + key + "='"; return nullptr; }
+                        if (!node->items.empty()) { error_ = "cannot mix fields and values in struct"; return nullptr; }
                         node->fields.emplace_back(key, std::move(val));
                         has_named_fields = true;
                         if (tok_.kind == Tk::Comma) advance();
                         continue;
                     }
-                    // Not followed by = -> it's a standalone enum literal as tuple element
-                    // Put the identifier back... we already consumed it.
-                    // The identifier sv is still valid, so create an EnumLit node.
-                    auto enum_node = std::make_unique<AstNode>();
-                    enum_node->kind = AstNode::Kind::EnumLit;
-                    enum_node->str_val = key;
-                    node->items.push_back(std::move(enum_node));
+                    auto en = std::make_unique<AstNode>();
+                    en->kind = AstNode::Kind::EnumLit;
+                    en->str_val = key;
+                    node->items.push_back(std::move(en));
                     if (tok_.kind == Tk::Comma) advance();
                     continue;
                 }
-                // Period followed by non-identifier treat as start of nested value
-                // (e.g. .{ ... }). Put period back conceptually by NOT consuming more.
-                // We advanced past the period, now tok_ is at Lb or something else.
-                // parse_value() needs to see Period+Lb. But we already consumed Period.
-                // So we need to handle this inline.
                 if (tok_.kind == Tk::Lb) {
-                    // .{ ... } -- nested struct/tuple value
-                    advance(); // consume {
+                    advance();
                     auto nested = parse_struct_or_tuple();
                     if (!nested) return nullptr;
                     node->items.push_back(std::move(nested));
@@ -253,28 +243,14 @@ private:
                 return nullptr;
             }
 
-            // Value (tuple element)
             auto val = parse_value();
             if (!val) { error_ = "expected value or field"; return nullptr; }
 
-            // If value is EnumLit followed by = treat as named field shorthand
-            if (val->kind == AstNode::Kind::EnumLit && tok_.kind == Tk::Equal) {
-                std::string key = val->str_val;
-                advance(); // consume =
-                auto fval = parse_value();
-                if (!fval) { error_ = "expected value after '." + key + " ='"; return nullptr; }
-                node->fields.emplace_back(key, std::move(fval));
-                has_named_fields = true;
-                if (tok_.kind == Tk::Comma) advance();
-                continue;
-            }
-
-            // Tuple element
+            if (has_named_fields) { error_ = "cannot mix fields and values"; return nullptr; }
             node->items.push_back(std::move(val));
             if (tok_.kind == Tk::Comma) advance();
         }
     }
-
     std::unique_ptr<AstNode> parse_array() {
         auto node = std::make_unique<AstNode>();
         node->kind = AstNode::Kind::Array;
