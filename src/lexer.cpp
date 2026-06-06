@@ -63,6 +63,32 @@ void Lexer::skip_ws_and_comments() {
     }
 }
 
+// -- UTF-8 validation --------------------------------------------------------
+
+void Lexer::validate_cp(uint32_t cp, int encoded_bytes) const {
+    // Overlong encoding: the codepoint is too small for the number of bytes used
+    //   2-byte sequences must encode U+0080..U+07FF
+    //   3-byte sequences must encode U+0800..U+FFFF   (excluding surrogates)
+    //   4-byte sequences must encode U+10000..U+10FFFF
+    uint32_t min_cp = 0;
+    switch (encoded_bytes) {
+        case 2: min_cp = 0x80;     break;
+        case 3: min_cp = 0x800;    break;
+        case 4: min_cp = 0x10000;  break;
+        default: return; // 1 byte: no overlong possible
+    }
+    if (cp < min_cp)
+        err("overlong UTF-8 sequence");
+
+    // Surrogate range (U+D800..U+DFFF) must never appear in well-formed UTF-8
+    if (cp >= 0xD800 && cp <= 0xDFFF)
+        err("surrogate code point U+" + std::to_string(cp) + " in UTF-8");
+
+    // Beyond Unicode maximum
+    if (cp > 0x10FFFF)
+        err("code point out of range");
+}
+
 // -- Identifier --------------------------------------------------------------
 
 std::string_view Lexer::rd_identifier() {
@@ -131,6 +157,7 @@ std::string Lexer::rd_string() {
                     if ((b & 0xC0) != 0x80) err("invalid UTF-8 continuation byte");
                     cp = (cp << 6) | (b & 0x3F);
                 }
+                validate_cp(cp, extra + 1);
                 utf8_encode(cp, out);
             }
         }
@@ -167,6 +194,7 @@ uint32_t Lexer::rd_char_content() {
             if ((b & 0xC0) != 0x80) err("invalid UTF-8 continuation byte");
             cp = (cp << 6) | (b & 0x3F);
         }
+        validate_cp(cp, extra + 1);
         return cp;
     }
     bump(); // consume backslash
@@ -217,6 +245,9 @@ uint32_t Lexer::rd_unicode_escape() {
     }
     if (!has_digit) err("empty \\u{}");
     bump(); // consume '}'
+    // Reject surrogate codepoints in \\u{} escape as well
+    if (cp >= 0xD800 && cp <= 0xDFFF)
+        err("surrogate code point U+" + std::to_string(cp) + " in \\u{} escape");
     return cp;
 }
 
@@ -244,9 +275,8 @@ void Lexer::utf8_encode(uint32_t cp, std::string& out) {
 
 // -- Number ------------------------------------------------------------------
 
-Token Lexer::rd_number(bool negative) {
+Token Lexer::rd_number() {
     std::string raw;
-    if (negative) raw.push_back('-');
 
     // Detect base prefix
     bool is_hex = false, is_bin = false, is_oct = false;
@@ -320,14 +350,12 @@ Token Lexer::rd_number(bool negative) {
         tok.num_is_float = true;
         // Try to parse as double. For hex floats, GCC's from_chars needs workaround.
         std::string src = (is_hex ? "0x" : "") + digits;
-        if (negative) src.insert(src.begin(), '-');
         double val = 0.0;
         auto fmt = is_hex ? std::chars_format::hex : std::chars_format::general;
         auto [ptr, ec] = std::from_chars(src.data(), src.data() + src.size(), val, fmt);
         if (is_hex && (ec != std::errc() || ptr != src.data() + src.size())) {
             // GCC workaround: retry without 0x prefix
             src = digits;
-            if (negative) src.insert(src.begin(), '-');
             auto [ptr2, ec2] = std::from_chars(src.data(), src.data() + src.size(), val, fmt);
             if (ec2 != std::errc() || ptr2 != src.data() + src.size())
                 err("invalid hex float: " + raw);
@@ -351,7 +379,7 @@ Token Lexer::rd_number(bool negative) {
         }
         if (overflow) {
             // Big integer -- store raw string
-            tok.num_u64 = 0;
+            tok.is_big_int = true;
         } else {
             tok.num_u64 = val;
         }
@@ -415,7 +443,7 @@ Token Lexer::next() {
 
     // Number
     if (std::isdigit((unsigned char)c)) {
-        return rd_number(false);
+        return rd_number();
     }
 
     err(std::string("unexpected character '") + c + "'");

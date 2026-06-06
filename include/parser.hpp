@@ -110,7 +110,7 @@ private:
                 } else {
                     node->int_val = tok_.num_u64;
                     // Preserve raw string for big ints
-                    if (tok_.num_u64 == 0 && !tok_.num_str.empty() && tok_.num_str != "0") {
+                    if (tok_.is_big_int) {
                         node->str_val = tok_.num_str;  // big integer
                     }
                 }
@@ -164,7 +164,7 @@ private:
                     } else {
                         node->int_val = tok_.num_u64;
                         // For negative big int preserve prefix
-                        if (tok_.num_u64 == 0 && !tok_.num_str.empty() && tok_.num_str != "0")
+                        if (tok_.is_big_int)
                             node->str_val = "-" + tok_.num_str;
                     }
                     advance();

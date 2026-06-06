@@ -26,6 +26,7 @@ enum class Tk {
 
 struct Token {
     Tk kind;
+    bool              is_big_int = false; // true = overflow, stored in num_str
     std::string       str;       // String content (without quotes)
     std::string       num_str;   // Raw number literal text (for parser to decode)
     uint64_t          num_u64;   // Parsed integer value (if fits u64)
@@ -54,11 +55,12 @@ private:
     void    skip_ws_and_comments();
 
     std::string_view rd_identifier();
-    Token            rd_number(bool negative);
+    Token            rd_number();
     std::string      rd_string();
     std::string      rd_multiline_line();
     uint32_t         rd_char_content();  // reads one escape or raw codepoint
     uint32_t         rd_unicode_escape();
 
     static void utf8_encode(uint32_t cp, std::string& out);
+    void validate_cp(uint32_t cp, int encoded_bytes) const;
 };

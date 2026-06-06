@@ -122,7 +122,7 @@ static int test_big_int() {
     std::printf("\n=== big integer ===\n");
     Lexer lex("18446744073709551616");
     Token t = lex.next();
-    CHECK(t.kind == Tk::Number && !t.num_is_float && t.num_u64 == 0 && t.num_str == "18446744073709551616", "big int");
+    CHECK(t.kind == Tk::Number && !t.num_is_float && t.is_big_int && t.num_str == "18446744073709551616", "big int");
     CHECK(lex.next().kind == Tk::Eof, "eof");
     return 0;
 }
