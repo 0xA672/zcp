@@ -1,0 +1,51 @@
+// zcp package manifest
+// ZON format — Zig Object Notation
+{
+    name = "zcp",
+    version = "0.1.0",
+    description = "A package manager for Zig",
+    author = .zcp_team,
+
+    // Dependencies
+    deps = {
+        known_folders = .{
+            path = "libs/known-folders",
+            // Pin to specific commit
+            commit = "a1b2c3d4e5f6",
+        },
+        zigly = .{
+            path = "libs/zigly",
+            tag = "v0.2.0",
+        },
+    },
+
+    // Build configuration
+    build = .{
+        optimize = .ReleaseSafe,
+        target = "x86_64-linux",
+        link_libc = false,
+    },
+
+    // Metadata
+    metadata = .{
+        license = "MIT",
+        homepage = "https://github.com/zcp/pkg",
+        keywords = ["package-manager", "zig", "zcp"],
+        maintainers = [
+            .{ name = "Alice", email = "alice@example.com" },
+            .{ name = "Bob",   email = "bob@example.com" },
+        ],
+    },
+
+    // Numbers
+    min_zig_version = "0.14.0",
+    max_threads = 16,
+    timeout_ms = 3_000,
+    pi_approx = 3.1415926535,
+    debug = true,
+    optional = null,
+    flags = 0xFF,
+    mask = 0b101010,
+    octal_perms = 0o755,
+    large = 18446744073709551616, // > 2^64, big int
+}

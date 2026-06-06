@@ -1,0 +1,3 @@
+.atomcode/
+tests/parse_test
+tests/smoke
